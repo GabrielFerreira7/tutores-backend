@@ -30,7 +30,7 @@ def _recent_history(session: Session, chat_session_id: str, limit: int) -> list[
     query = (
         select(ChatMessage)
         .where(ChatMessage.session_id == chat_session_id)
-        .order_by(ChatMessage.created_at.desc())
+        .order_by(ChatMessage.id.desc())
         .limit(limit)
     )
     messages = list(session.exec(query))

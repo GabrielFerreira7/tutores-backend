@@ -29,7 +29,10 @@ class ChatSession(SQLModel, table=True):
 
 
 class ChatMessage(SQLModel, table=True):
-    id: str = Field(default_factory=_new_id, primary_key=True)
+    # Autoincrement int PK (not exposed via the API) instead of a UUID: it gives a cheap,
+    # reliable insertion order for "last N messages" even when two messages share the same
+    # wall-clock timestamp (observed on Windows' coarser clock resolution).
+    id: int | None = Field(default=None, primary_key=True)
     session_id: str = Field(foreign_key="chatsession.id", index=True)
     role: str  # "user" | "assistant"
     content: str
