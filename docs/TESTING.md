@@ -19,6 +19,16 @@
   cd frontend && docker compose up -d
   ```
 - [ ] Backend respondendo: `curl http://localhost:8000/health` → `{"status":"ok"}`
+- [ ] Popular os dois tutores de exemplo (Tutor 1 e Tutor 2 abaixo):
+  ```bash
+  docker compose exec backend python -m app.seed
+  ```
+  Passo opcional, mas sem ele o banco começa **vazio** — nenhum tutor é criado
+  automaticamente no startup do backend (ver "Dados de exemplo (seed)" no
+  `backend/README.md` para o porquê disso ser um passo explícito em vez de
+  automático). É seguro rodar de novo a qualquer momento: só insere os dois
+  tutores se o banco ainda não tiver nenhum tutor, nunca sobrescreve dados
+  existentes.
 - [ ] Frontend respondendo: abrir http://localhost:5173/admin/tutors no navegador
 - [ ] `backend/.env` com uma **chave real de LLM** (`ANTHROPIC_API_KEY` ou `OPENAI_API_KEY`,
       conforme o `LLM_MODEL` escolhido) e com quota/billing disponível na conta do provedor —
@@ -41,7 +51,7 @@ Use estes dados prontos ao testar o formulário de criação/edição de tutor n
 (`+ Novo tutor`). Cobrem os quatro cenários que valem a pena testar: sem fonte, com fonte válida,
 com fonte quebrada (404) e com fonte bloqueada por segurança (SSRF).
 
-### Tutor 1 — "Tutor de Boas-Vindas" (já criado via API, sem fonte)
+### Tutor 1 — "Tutor de Boas-Vindas" (criado pelo seed, sem fonte)
 
 | Campo | Valor |
 |---|---|
@@ -53,7 +63,7 @@ com fonte quebrada (404) e com fonte bloqueada por segurança (SSRF).
 | Mensagem de teste | `Olá, quem é você e o que você faz?` |
 | Esperado | Resposta coerente com a persona, sem tentar consultar nenhuma fonte |
 
-### Tutor 2 — "Tutor de .gitignore" (já criado via API, com fonte real)
+### Tutor 2 — "Tutor de .gitignore" (criado pelo seed, com fonte real)
 
 | Campo | Valor |
 |---|---|
