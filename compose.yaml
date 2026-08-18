@@ -25,6 +25,19 @@ services:
       - tutores-postgres-data:/var/lib/postgresql/data
     restart: unless-stopped
 
+  # Opcional: só sobe com "docker compose --profile local-llm up -d ollama". Provisiona um
+  # LLM local para quem não tiver (ou não quiser gastar) uma chave de API de um provedor
+  # pago — ver .env.example e README.md, seção "Sem chave de LLM?".
+  ollama:
+    image: ollama/ollama:latest
+    profiles: ["local-llm"]
+    ports:
+      - "11434:11434"
+    volumes:
+      - tutores-ollama-data:/root/.ollama
+    restart: unless-stopped
+
 volumes:
   tutors-data:
   tutores-postgres-data:
+  tutores-ollama-data:
