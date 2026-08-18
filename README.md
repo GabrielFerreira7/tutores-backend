@@ -50,7 +50,7 @@ Veja `.env.example` para a lista completa e comentada. Principais:
 | Variável | Uso |
 |---|---|
 | `ADMIN_API_KEY` | Chave exigida no header `X-Admin-Api-Key` para todas as rotas `/api/admin/*` |
-| `DATABASE_URL` | String de conexão SQLAlchemy (default: SQLite local em `./data/tutors.db`) |
+| `DATABASE_URL` | **Obrigatória** — string de conexão SQLAlchemy. Ver seção [Banco de dados](#banco-de-dados) abaixo antes de rodar em qualquer ambiente que não seja o seu localhost |
 | `LLM_MODEL` | Modelo no formato `provider:model` do pydantic-ai (ex.: `anthropic:claude-haiku-4-5-20251001`) |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Lida diretamente pelo SDK do provedor (nunca pela aplicação) |
 | `MAX_SOURCE_FETCH_BYTES`, `SOURCE_FETCH_TIMEOUT_SECONDS`, `SOURCE_CACHE_TTL_SECONDS` | Limites do fetch de fontes de conhecimento |
@@ -58,6 +58,56 @@ Veja `.env.example` para a lista completa e comentada. Principais:
 | `CORS_ALLOWED_ORIGINS` | Lista separada por vírgula, ou `*` |
 | `CHAT_RATE_LIMIT` | Limite da rota pública de chat, sintaxe do `slowapi` (ex. `20/minute`) |
 | `FRONTEND_BASE_URL` | Usada só para montar o snippet `<iframe>` retornado ao admin |
+
+## Banco de dados
+
+A aplicação **precisa** de `DATABASE_URL` configurada em `.env` — sem ela, `Settings` cai no
+default (`sqlite:///./data/tutors.db`), o que funciona para rodar local mas não deve ser
+assumido implicitamente em outros ambientes. Configure explicitamente essa variável em
+qualquer deploy fora do seu localhost.
+
+### Opção padrão — SQLite (zero provisionamento)
+
+Não é preciso instalar nem subir nada: no primeiro start, `app/db.py` cria o diretório
+`data/` e o arquivo `tutors.db` automaticamente, e `SQLModel.metadata.create_all(engine)`
+cria as tabelas. Basta a `DATABASE_URL` apontar para um caminho de arquivo local:
+
+```bash
+DATABASE_URL=sqlite:///./data/tutors.db
+```
+
+No Docker, esse arquivo vive dentro do volume nomeado `tutors-data` (declarado no
+`compose.yaml`), então sobrevive a `docker compose restart`/`up` — só é perdido se o volume
+for removido explicitamente (`docker compose down -v`).
+
+### Alternativa — PostgreSQL (se não houver banco disponível no ambiente)
+
+Se o ambiente onde você for rodar isso **não tiver um PostgreSQL disponível**, este repo
+já traz um serviço descartável pronto no `compose.yaml`, atrás de um profile (não sobe
+com o `docker compose up` normal, só sob demanda):
+
+```bash
+# 1. Provisiona um Postgres local descartável (porta 5432, usuário/senha "tutores")
+docker compose --profile postgres up -d db
+
+# 2. Instala o driver (não vem por padrão, só quem usa Postgres precisa dele)
+pip install "psycopg[binary]==3.2.3"
+# ou descomente a linha correspondente em requirements.txt e rode pip install -r requirements.txt
+
+# 3. Aponta o backend para ele em .env
+DATABASE_URL=postgresql+psycopg://tutores:tutores@localhost:5432/tutores
+# se o backend também estiver rodando via docker compose (não local), use "db" em vez de
+# "localhost" — é o nome do serviço na rede interna do compose:
+# DATABASE_URL=postgresql+psycopg://tutores:tutores@db:5432/tutores
+
+# 4. Recria o backend para pegar a nova env var (restart sozinho não relê o .env)
+docker compose up -d --force-recreate backend
+```
+
+Como a persistência é feita via SQLModel/SQLAlchemy, nenhuma linha de código muda ao trocar
+de SQLite para Postgres — só a `DATABASE_URL` e o driver instalado. Se você tiver um
+PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só aponte a
+`DATABASE_URL` para ele em vez de usar o serviço `db` do compose.
 
 ## Decisões de arquitetura
 

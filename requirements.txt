@@ -7,6 +7,11 @@ httpx==0.28.1
 python-dotenv==1.2.3
 slowapi==0.1.10
 
+# Driver do PostgreSQL — descomente se trocar DATABASE_URL de sqlite:// para
+# postgresql+psycopg://... (ver README.md, seção "Banco de dados"). Não é necessário
+# para o default (SQLite), por isso fica fora da instalação padrão.
+# psycopg[binary]==3.2.3
+
 # dev / test
 pytest==9.1.1
 pytest-asyncio==1.4.0
