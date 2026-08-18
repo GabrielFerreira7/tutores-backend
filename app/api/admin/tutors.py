@@ -49,9 +49,7 @@ def get_embed_snippet(
     settings: Settings = Depends(get_settings),
 ):
     tutor = tutor_service.get_tutor(session, tutor_id)
-    embed_url = (
-        f"{settings.frontend_base_url}/widget?tutorId={tutor.id}&token={tutor.embed_token}"
-    )
+    embed_url = f"{settings.frontend_base_url}/widget?tutorId={tutor.id}&token={tutor.embed_token}"
     snippet = (
         f'<iframe src="{embed_url}" width="380" height="560" '
         'style="border:1px solid #e2e2e2;border-radius:12px" '
