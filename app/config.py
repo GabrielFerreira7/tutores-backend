@@ -35,6 +35,9 @@ class Settings(BaseSettings):
 
     # Rate limiting (slowapi syntax, e.g. "20/minute")
     chat_rate_limit: str = "20/minute"
+    # Mais generoso que o do chat: só existe para dificultar brute-force da admin key,
+    # não para conter tráfego legítimo de um único operador administrativo.
+    admin_rate_limit: str = "60/minute"
 
     log_level: str = "INFO"
 
