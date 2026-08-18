@@ -115,6 +115,44 @@ de SQLite para Postgres — só a `DATABASE_URL` e o driver instalado. Se você 
 PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só aponte a
 `DATABASE_URL` para ele em vez de usar o serviço `db` do compose.
 
+## Dados de exemplo (seed)
+
+O banco começa **vazio**: como explicado acima, `data/` (SQLite) fica fora do controle de
+versão de propósito — dados de aplicação (tutores, tokens de embed, histórico de chat) não
+devem ir pro git, só código. Isso significa que qualquer clone deste repositório precisa
+criar tutores do zero antes de ter algo pra mostrar.
+
+Para eliminar esse passo manual, existe um script de seed que popula dois tutores de exemplo
+prontos para uso (os mesmos "Tutor 1" e "Tutor 2" descritos em
+[`docs/TESTING.md`](docs/TESTING.md)):
+
+```bash
+docker compose exec backend python -m app.seed
+# ou, rodando localmente sem Docker:
+python -m app.seed
+```
+
+É seguro rodar quantas vezes quiser: `seed_example_tutors()` só insere os dois tutores se o
+banco **ainda não tiver nenhum tutor** — nunca sobrescreve ou duplica dados existentes.
+
+**Por que isso não roda sozinho no startup do backend?** Foi uma escolha deliberada, não um
+esquecimento:
+
+- O mesmo `lifespan` do FastAPI que cria as tabelas (`create_db_and_tables()`) também é
+  disparado pela suíte de testes via `TestClient` — se o seed rodasse ali, `pytest` passaria
+  a escrever tutores de demo no `data/tutors.db` real do desenvolvedor a cada execução, sem
+  nenhuma relação com o que o teste está validando.
+- Um deploy real não deveria ganhar dois tutores de demonstração "de graça" no primeiro
+  boot sem ninguém pedir — dados de exemplo devem ser um passo opt-in, do mesmo jeito que os
+  profiles `postgres` e `local-llm` do `compose.yaml` também não sobem sozinhos.
+
+Os IDs e `embed_token`s dos dois tutores de exemplo são **fixos** (não gerados
+aleatoriamente a cada seed), de propósito: é o que permite os links de widget já prontos em
+`docs/TESTING.md` funcionarem em qualquer clone, sem precisar copiar valores novos do
+dashboard antes de testar. Assim como o `ADMIN_API_KEY` padrão (`dot-demo-admin-key`), são
+valores de demo conhecidos, não segredos — regenere o token de cada tutor pelo dashboard
+("Regenerar token") antes de usar isso como base de um deploy real.
+
 ## Sem chave de LLM? Use um modelo local (Ollama)
 
 Se você não tem (ou não quer gastar) uma chave de API de um provedor pago, este repo traz
