@@ -113,7 +113,20 @@ PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só apo
 
 Se você não tem (ou não quer gastar) uma chave de API de um provedor pago, este repo traz
 um serviço opcional de [Ollama](https://ollama.com) — runtime de LLM local — atrás de um
-profile do `compose.yaml`, igual ao do Postgres:
+profile do `compose.yaml` (**não sobe com `docker compose up` normal, só sob demanda**),
+igual ao do Postgres.
+
+Isso é *opt-in* em dois níveis independentes, e os dois precisam ser verdade para o Ollama
+entrar em uso:
+
+1. O serviço `ollama` só existe se alguém rodar `docker compose --profile local-llm up -d
+   ollama` explicitamente — sem isso, ele não roda, não consome porta/RAM/CPU, e o backend
+   nem sabe que ele existe.
+2. Mesmo com o serviço no ar, o backend só fala com ele se `LLM_MODEL` em `.env` apontar
+   para `ollama:...`. **Se você já tem uma chave real configurada (`LLM_MODEL=anthropic:...`
+   ou `openai:...`), nada muda** — o Ollama fica completamente inerte, mesmo que o container
+   esteja rodando. Não existe fallback automático de "chave falhou → tenta o local"; é uma
+   troca manual de `LLM_MODEL`, uma ou outra, nunca os dois ao mesmo tempo.
 
 ```bash
 # 1. Sobe o Ollama (porta 11434)
