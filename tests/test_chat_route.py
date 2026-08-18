@@ -71,3 +71,21 @@ def test_unhandled_error_does_not_leak_stack_trace(client, admin_headers):
 
     assert response.status_code == 404
     assert "Traceback" not in response.text
+
+
+def test_chat_rate_limit_returns_well_formed_429(client, admin_headers):
+    """Regressão: o handler de RateLimitExceeded copiava Content-Length do corpo
+    original do slowapi para um corpo diferente (mensagem em PT), o que o
+    TestClient não pega (não passa pelo parser HTTP real), mas quebrava a
+    resposta de verdade em produção. Aqui validamos ao menos que o body/JSON
+    do 429 é consistente e não deixa de ter `detail`.
+    """
+    tutor = _create_tutor(client, admin_headers)
+    payload = {"tutor_id": tutor["id"], "embed_token": tutor["embed_token"], "message": "oi"}
+
+    responses = [client.post("/api/public/chat", json=payload) for _ in range(21)]
+    statuses = [r.status_code for r in responses]
+
+    assert statuses.count(429) >= 1, statuses
+    limited = next(r for r in responses if r.status_code == 429)
+    assert limited.json()["detail"]
