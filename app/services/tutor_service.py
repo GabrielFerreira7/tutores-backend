@@ -1,3 +1,4 @@
+import hmac
 from datetime import UTC, datetime
 
 from sqlmodel import Session, select
@@ -78,6 +79,6 @@ def get_tutor_for_embed(session: Session, tutor_id: str, embed_token: str) -> Tu
     tutor = session.get(Tutor, tutor_id)
     if not tutor:
         raise NotFoundError("Tutor não encontrado.")
-    if tutor.embed_token != embed_token:
+    if not hmac.compare_digest(tutor.embed_token, embed_token):
         raise ForbiddenError("Token de embed inválido para este tutor.")
     return tutor
