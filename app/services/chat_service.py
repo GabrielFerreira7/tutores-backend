@@ -45,6 +45,36 @@ def _append_message(session: Session, chat_session: ChatSession, role: str, cont
     session.commit()
 
 
+def _trim_history(session: Session, chat_session_id: str, keep: int) -> None:
+    """Mantém só as últimas `keep` mensagens por sessão — sem isso a tabela de mensagens
+    cresce sem limite, já que _recent_history só limita o que é *lido*, não o que é
+    persistido."""
+    if keep <= 0:
+        return
+    recent_ids = list(
+        session.exec(
+            select(ChatMessage.id)
+            .where(ChatMessage.session_id == chat_session_id)
+            .order_by(ChatMessage.id.desc())
+            .limit(keep)
+        )
+    )
+    if not recent_ids:
+        return
+    stale = session.exec(
+        select(ChatMessage).where(
+            ChatMessage.session_id == chat_session_id,
+            ChatMessage.id.not_in(recent_ids),
+        )
+    )
+    deleted = False
+    for message in stale:
+        session.delete(message)
+        deleted = True
+    if deleted:
+        session.commit()
+
+
 async def handle_chat_request(
     session: Session,
     data: ChatRequest,
@@ -58,10 +88,15 @@ async def handle_chat_request(
     chat_session = _get_or_create_session(session, tutor.id, data.session_id)
     history = _recent_history(session, chat_session.id, settings.chat_history_limit)
 
+    # A mensagem do usuário é persistida antes de chamar o LLM: se o turno falhar
+    # (provedor fora do ar, timeout), a pergunta ainda fica registrada para depuração,
+    # em vez de desaparecer junto com o erro.
+    _append_message(session, chat_session, "user", data.message)
+
     reply = await run_tutor_turn(session, tutor, history, data.message, settings, model=model)
 
-    _append_message(session, chat_session, "user", data.message)
     _append_message(session, chat_session, "assistant", reply)
+    _trim_history(session, chat_session.id, settings.chat_history_limit)
 
     return ChatResponse(session_id=chat_session.id, reply=reply)
 
