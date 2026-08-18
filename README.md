@@ -109,6 +109,53 @@ de SQLite para Postgres — só a `DATABASE_URL` e o driver instalado. Se você 
 PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só aponte a
 `DATABASE_URL` para ele em vez de usar o serviço `db` do compose.
 
+## Sem chave de LLM? Use um modelo local (Ollama)
+
+Se você não tem (ou não quer gastar) uma chave de API de um provedor pago, este repo traz
+um serviço opcional de [Ollama](https://ollama.com) — runtime de LLM local — atrás de um
+profile do `compose.yaml`, igual ao do Postgres:
+
+```bash
+# 1. Sobe o Ollama (porta 11434)
+docker compose --profile local-llm up -d ollama
+
+# 2. Baixa um modelo pequeno (uma vez só; fica no volume tutores-ollama-data)
+docker exec -it $(docker compose ps -q ollama) ollama pull qwen2.5:0.5b
+
+# 3. Aponta o backend para ele em .env
+LLM_MODEL=ollama:qwen2.5:0.5b
+OLLAMA_BASE_URL=http://ollama:11434/v1
+
+# 4. Recria o backend (restart sozinho não relê o .env)
+docker compose up -d --force-recreate backend
+```
+
+O pydantic-ai já tem um provider nativo para Ollama (lê `OLLAMA_BASE_URL`), então nenhuma
+linha de código precisa mudar — é só configuração, igual à troca de banco de dados.
+
+### ⚠️ Testado de verdade — e a tool calling não funcionou nos modelos pequenos
+
+Antes de documentar isso, testei manualmente contra o backend real (não só em teoria):
+
+| Modelo | Conversa simples (sem fonte) | Tool calling (`fetch_source`) | Latência (CPU, sem GPU) |
+|---|---|---|---|
+| `qwen2.5:0.5b` | ✅ Resposta coerente | ❌ Nunca invocou a tool (fonte nunca ficou em cache) | ~5s |
+| `llama3.2:1b` | — | ❌ "Tentou" chamar a tool, mas vazou o JSON da chamada como texto da resposta em vez de usar o protocolo de tool calling da API | ~9s |
+| `qwen2.5:3b` | — | ❌ Mesma falha — nunca buscou a fonte de verdade | ~22s |
+
+**Conclusão honesta**: um modelo local pequeno via Ollama é uma opção real e testada para
+**tutores sem fonte de conhecimento** (persona/conversa pura) — funciona, é grátis, não
+precisa de internet além do pull inicial. Mas para tutores que dependem de `fetch_source`
+(o núcleo da estratégia agêntica deste desafio), nenhum dos três modelos testados chamou a
+tool de forma confiável — a causa provável é como o endpoint OpenAI-compatible do Ollama
+lida com tool calling nesses modelos/quantizações, não um bug deste código. Se você
+precisar de um tutor com fonte respondendo de verdade, use uma chave real (Anthropic/OpenAI)
+para esse caso — o modelo local fica como fallback de conversa, não substituto completo.
+
+Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiável (ex.
+`qwen2.5:7b` ou `qwen2.5:14b`), o mesmo passo a passo vale — só troque a tag no `pull` e no
+`LLM_MODEL`; espere latência bem maior sem GPU.
+
 ## Decisões de arquitetura
 
 | Decisão | Escolha | Por quê |
@@ -122,6 +169,7 @@ PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só apo
 | Persistência | SQLite via SQLModel/SQLAlchemy | Zero infraestrutura extra para rodar o demo; troca para PostgreSQL é apenas mudar `DATABASE_URL`, pois a camada ORM é agnóstica ao dialeto |
 | Rate limiting | `slowapi`, por IP, só na rota pública de chat | É o endpoint mais exposto (sem auth de usuário real); RNF explícito do desafio |
 | Logs | JSON estruturado (`app/core/logging.py`) | Facilita depurar falhas de tool call do agente (RNF explícito) |
+| Fallback de LLM sem chave de API | Ollama atrás de um profile do Docker Compose (não LM Studio/vLLM/repo próprio) | pydantic-ai já tem provider nativo para Ollama (zero código); testado e honesto sobre a limitação real (tool calling não confiável em modelos ≤3B — ver seção "Sem chave de LLM?") |
 
 ## Fluxo embed ponta a ponta
 
@@ -149,6 +197,9 @@ PostgreSQL gerenciado externo (RDS, Supabase, Neon, etc.), o mesmo vale: só apo
   sem autenticação na fonte, sem crawler.
 - SQLite não é adequado para alta concorrência real; ver `DATABASE_URL` para trocar por Postgres.
 - Sem streaming de resposta (SSE/WebSocket): a resposta do chat é retornada de uma vez.
+- Fallback local via Ollama (ver "Sem chave de LLM?") só é confiável para tutores **sem**
+  fonte de conhecimento — testado e confirmado que modelos ≤3B não chamam `fetch_source` de
+  forma consistente através do endpoint OpenAI-compatible do Ollama.
 
 ## Próximos passos para produção (não implementados)
 
