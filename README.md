@@ -1,8 +1,13 @@
 # Tutores — Backend
 
 API do MVP da **Plataforma de Tutores Personalizados** (desafio técnico DOT Digital Group).
-FastAPI + Pydantic AI + SQLModel/SQLite. Ver o repositório irmão `../frontend` para o
-dashboard admin e o widget de embed.
+FastAPI + Pydantic AI + SQLModel/SQLite. Ver o repositório irmão
+[`tutores-frontend`](https://github.com/GabrielFerreira7/tutores-frontend) para o dashboard
+admin e o widget de embed.
+
+Documentação adicional: [plano de implementação](docs/IMPLEMENTATION_PLAN.md) (diagramas de
+arquitetura, decisões e trade-offs discutidos antes de implementar) e
+[roteiro de testes manuais](docs/TESTING.md) (cobre os dois repositórios juntos).
 
 > **Aviso de processo**: este código foi construído com o auxílio de um agente de codificação
 > (Claude Code) sob supervisão humana, conforme exigido pelo enunciado do desafio — não foi
@@ -36,7 +41,8 @@ docker compose up --build
 
 ```bash
 pytest
-ruff check app tests
+ruff check app tests   # lint
+ruff format app tests  # formatador (substitui black; um único binário para as duas coisas)
 ```
 
 Os testes **não fazem chamadas reais a nenhum provedor de LLM** — a rota de chat usa
@@ -227,8 +233,9 @@ Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiáve
 
 ## Diagrama de arquitetura
 
-Ver `../IMPLEMENTATION_PLAN.md` na raiz do projeto para os diagramas completos (Mermaid).
-Resumo em ASCII:
+Ver [`docs/IMPLEMENTATION_PLAN.md`](docs/IMPLEMENTATION_PLAN.md) para os diagramas completos
+(Mermaid: componentes, sequência de conversa, sequência de setup de embed, modelo de dados).
+Resumo em ASCII (frontend, backend, agente, persistência, embed):
 
 ```
 Integrador (site) --iframe--> Widget (frontend) --HTTP--> Backend API
