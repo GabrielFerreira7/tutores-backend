@@ -9,5 +9,22 @@ services:
       - tutors-data:/app/data
     restart: unless-stopped
 
+  # Opcional: só sobe com "docker compose --profile postgres up -d". Provisiona um
+  # PostgreSQL descartável para quem não tiver um banco disponível no ambiente e quiser
+  # trocar o DATABASE_URL padrão (SQLite) por Postgres — ver .env.example e README.md.
+  db:
+    image: postgres:16-alpine
+    profiles: ["postgres"]
+    environment:
+      POSTGRES_USER: tutores
+      POSTGRES_PASSWORD: tutores
+      POSTGRES_DB: tutores
+    ports:
+      - "5432:5432"
+    volumes:
+      - tutores-postgres-data:/var/lib/postgresql/data
+    restart: unless-stopped
+
 volumes:
   tutors-data:
+  tutores-postgres-data:
