@@ -222,14 +222,81 @@ Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiáve
 
 ## Próximos passos para produção (não implementados)
 
-- Autenticação multi-admin (JWT/OAuth) em vez de API key estática.
-- Migração para PostgreSQL + Alembic para migrações versionadas.
-- Streaming de resposta (SSE) para reduzir a latência percebida.
-- Expiração/rotação automática de `embed_token`, com possibilidade de múltiplos tokens por tutor.
-- Harness de avaliação automatizada do agente (conjunto de perguntas-âncora + verificação de
-  alucinação) além do QA manual.
-- Hardening adicional de SSRF (allow-list de domínios por tutor, proxy de egress dedicado).
-- Isolamento multi-tenant real caso a plataforma passe a atender múltiplas organizações.
+Lista de evolução, conforme pedido pelo PRD (seção 8b) — nada abaixo está implementado
+neste MVP, é só o roteiro do que viria depois. Alguns itens (RAG vetorial, por exemplo)
+tocam em pontos explicitamente fora de escopo desta entrega (PRD seção 6b); estão aqui
+apenas como possibilidade *futura e opcional*, não como algo que este MVP deveria ter feito.
+
+### Deploy e infraestrutura
+
+- **Hospedagem**: hoje só há `Dockerfile`/`compose.yaml` para rodar local; em produção, subir
+  a imagem em um serviço gerenciado (Fly.io, Railway, Render, AWS Fargate/App Runner, Google
+  Cloud Run) atrás de HTTPS gerenciado pelo provedor, em vez de expor a porta 8000 direto.
+- **Domínio**: um esquema simples funciona bem aqui — algo como `api.tutores.<dominio>` para o
+  backend e `app.tutores.<dominio>` (admin) / `embed.tutores.<dominio>` (widget) para o
+  frontend, mantendo o admin e o widget público em subdomínios/paths separados por clareza,
+  não por necessidade técnica.
+- **Banco gerenciado**: trocar SQLite por PostgreSQL gerenciado (RDS, Supabase, Neon — a troca
+  já é trivial, só mudar `DATABASE_URL`, ver seção "Banco de dados" acima) para permitir mais
+  de uma instância do backend rodando ao mesmo tempo atrás de um load balancer.
+- **Secrets**: mover `ADMIN_API_KEY`/chaves de LLM do `.env` local para um secret manager do
+  provedor de hospedagem (Fly secrets, AWS Secrets Manager, variáveis criptografadas do CI) —
+  nunca commitar, nunca deixar em texto puro num volume compartilhado.
+- **CI/CD**: pipeline (ex. GitHub Actions) rodando `pytest` + `ruff check` + `ruff format --check`
+  em cada PR, build/push da imagem Docker e deploy automático ao mergear na `main`. Hoje essa
+  verificação é manual, feita antes de cada push.
+- **CORS de produção**: restringir `CORS_ALLOWED_ORIGINS` aos domínios reais dos integradores
+  autorizados — o `*` atual é aceitável só para demo local, documentado como tal.
+- **Cabeçalhos de embed**: configurar explicitamente `Content-Security-Policy: frame-ancestors`
+  com allow-list dos domínios integradores autorizados a incorporar o widget (hoje funciona
+  por *ausência* de bloqueio; em produção deveria ser uma permissão explícita, não implícita).
+- **Observabilidade real**: os logs JSON estruturados já existem, mas em produção precisam de
+  um destino de agregação (Grafana Loki, Datadog, CloudWatch Logs), rastreamento de erros
+  (Sentry) e alertas de uptime/latência sobre a rota de chat.
+- **Escalonamento horizontal**: o backend já é stateless (sem estado em memória entre
+  requisições, exceto o cache de fonte, que é só otimização), então escalar horizontalmente
+  atrás de um load balancer é direto assim que o banco deixar de ser SQLite local.
+
+### Estratégia de conhecimento e evolução do agente
+
+- **RAG vetorial como complemento opcional, não substituto**: se o volume/tamanho das fontes de
+  um tutor crescer muito (dezenas de documentos grandes), o fetch simples + cache pode não
+  escalar bem. Uma evolução possível é adicionar uma tool adicional (`search_knowledge_base`,
+  por exemplo, apoiada em embeddings/índice vetorial) **ao lado** de `fetch_source` — o agente
+  continuaria decidindo qual ferramenta usar, mantendo a estratégia agêntica como núcleo
+  (conforme exigido pelo PRD) em vez de trocá-la por um pipeline de RAG clássico.
+- **Chunking e sumarização incremental** de fontes grandes antes de truncar, em vez do corte
+  simples por tamanho de bytes usado hoje (`MAX_SOURCE_FETCH_BYTES`).
+- **Cache semântico** de respostas para perguntas repetidas/similares, reduzindo custo e
+  latência além do cache de fonte já existente.
+- **Streaming de resposta** (SSE) para reduzir a latência percebida — hoje a resposta só chega
+  de uma vez.
+- **Roteamento de modelo por custo**: usar um modelo mais barato/rápido por padrão e escalar
+  para um mais caro só em casos que o modelo barato sinalize incerteza.
+- **Monitorar confiabilidade de tool calling por provedor/modelo**: testamos isso de verdade
+  (ver seção "Sem chave de LLM?") e nem todo modelo chama `fetch_source` de forma confiável —
+  vale registrar isso por modelo/provedor conforme novos forem adicionados, não assumir que
+  "qualquer LLM com tool calling" funciona igual.
+
+### Segurança e confiabilidade
+
+- **Mitigação de prompt injection via fonte externa**: o conteúdo de `fetch_source` vem de uma
+  URL pública e é injetado no contexto do LLM — uma fonte maliciosa poderia conter texto
+  tentando sobrescrever as instruções do tutor (“ignore as instruções anteriores e...”). Hoje
+  não há sanitização/isolamento desse conteúdo além do limite de tamanho; em produção, vale
+  marcar explicitamente o conteúdo buscado como *dado não confiável*, não instrução, no prompt.
+- **Harness de avaliação automatizada** do agente (conjunto de perguntas-âncora + verificação
+  de alucinação/regressão de prompt) além do QA manual atual.
+- **Guardrails de conteúdo** (moderação de entrada/saída) se a plataforma passar a atender
+  público não controlado.
+- **Autenticação multi-admin** (JWT/OAuth) em vez de API key estática — hoje é aceitável por
+  ser um único papel administrativo no escopo do MVP.
+- **Expiração/rotação automática** de `embed_token`, com possibilidade de múltiplos tokens por
+  tutor (ex.: um por ambiente/integrador).
+- **Hardening adicional de SSRF**: allow-list de domínios por tutor, proxy de egress dedicado —
+  a mitigação atual (bloqueio de IP privado/loopback) é básica, não completa.
+- **Isolamento multi-tenant real**, caso a plataforma passe a atender múltiplas organizações
+  com dados segregados de verdade (hoje é single-tenant, fora de escopo explícito do PRD).
 
 ## Diagrama de arquitetura
 
