@@ -1,4 +1,5 @@
 import logging
+from contextlib import asynccontextmanager
 
 from fastapi import FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
@@ -19,7 +20,14 @@ settings = get_settings()
 configure_logging(settings.log_level)
 logger = logging.getLogger(__name__)
 
-app = FastAPI(title="Plataforma de Tutores Personalizados — API")
+@asynccontextmanager
+async def lifespan(app: FastAPI):
+    create_db_and_tables()
+    logger.info("startup_complete")
+    yield
+
+
+app = FastAPI(title="Plataforma de Tutores Personalizados — API", lifespan=lifespan)
 
 app.state.limiter = limiter
 
@@ -47,12 +55,6 @@ register_exception_handlers(app)
 
 app.include_router(admin_tutors_router)
 app.include_router(public_chat_router)
-
-
-@app.on_event("startup")
-def on_startup() -> None:
-    create_db_and_tables()
-    logger.info("startup_complete")
 
 
 @app.get("/health")
