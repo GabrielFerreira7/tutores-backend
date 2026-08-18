@@ -36,10 +36,22 @@ app.state.limiter = limiter
 @app.exception_handler(RateLimitExceeded)
 async def rate_limit_handler(request, exc: RateLimitExceeded):
     response = _rate_limit_exceeded_handler(request, exc)
+    # Copia só os headers informativos do slowapi (ex. Retry-After) — nunca
+    # Content-Length/Content-Type, que foram calculados para o corpo original
+    # do slowapi, não para o nosso JSON com mensagem em português. Copiar
+    # Content-Length "cru" aqui gerava um RuntimeError real do uvicorn
+    # ("Response content longer than Content-Length") toda vez que o rate
+    # limit disparava em produção (só não aparecia via TestClient, que não
+    # passa pelo parser HTTP real).
+    headers = {
+        key: value
+        for key, value in response.headers.items()
+        if key.lower() not in ("content-length", "content-type")
+    }
     return JSONResponse(
         status_code=status.HTTP_429_TOO_MANY_REQUESTS,
         content={"detail": "Muitas requisições. Tente novamente em instantes."},
-        headers=dict(response.headers),
+        headers=headers,
     )
 
 
