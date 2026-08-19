@@ -35,11 +35,23 @@ def test_create_tutor_and_chat_end_to_end(client, admin_headers):
 
     history = client.get(
         f"/api/public/chat/{body['session_id']}/history",
-        params={"tutor_id": tutor["id"], "embed_token": tutor["embed_token"]},
+        params={"tutor_id": tutor["id"]},
+        headers={"X-Embed-Token": tutor["embed_token"]},
     )
     assert history.status_code == 200
     roles = [m["role"] for m in history.json()["messages"]]
     assert roles == ["user", "assistant"]
+
+    info = client.get(
+        f"/api/public/tutors/{tutor['id']}",
+        headers={"X-Embed-Token": tutor["embed_token"]},
+    )
+    assert info.status_code == 200
+    assert info.json() == {
+        "id": tutor["id"],
+        "title": tutor["title"],
+        "short_description": tutor["short_description"],
+    }
 
 
 def test_chat_rejects_invalid_embed_token(client, admin_headers):
@@ -71,6 +83,24 @@ def test_unhandled_error_does_not_leak_stack_trace(client, admin_headers):
 
     assert response.status_code == 404
     assert "Traceback" not in response.text
+
+
+def test_update_tutor_rejects_invalid_status_with_400(client, admin_headers):
+    tutor = _create_tutor(client, admin_headers)
+
+    response = client.patch(
+        f"/api/admin/tutors/{tutor['id']}", json={"status": "banana"}, headers=admin_headers
+    )
+
+    assert response.status_code == 400
+    assert "Traceback" not in response.text
+
+
+def test_health_check_ok(client):
+    response = client.get("/health")
+
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
 
 
 def test_chat_rate_limit_returns_well_formed_429(client, admin_headers):

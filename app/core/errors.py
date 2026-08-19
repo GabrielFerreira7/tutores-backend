@@ -42,6 +42,11 @@ class TutorUnavailableError(AppError):
     detail = "Este tutor está indisponível no momento."
 
 
+class ServiceUnavailableError(AppError):
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+    detail = "O tutor está temporariamente indisponível. Tente novamente em instantes."
+
+
 def register_exception_handlers(app: FastAPI) -> None:
     @app.exception_handler(AppError)
     async def handle_app_error(request: Request, exc: AppError):

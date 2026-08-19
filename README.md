@@ -48,6 +48,13 @@ ruff format app tests  # formatador (substitui black; um único binário para as
 Os testes **não fazem chamadas reais a nenhum provedor de LLM** — a rota de chat usa
 `pydantic_ai.models.test.TestModel` injetado via *dependency override* (`tests/conftest.py`),
 e o fetch de fontes é mockado com `respx`. Isso mantém a suíte determinística, rápida e sem custo.
+A suíte também não toca no banco real configurado no `.env`: o `engine` de `app/db.py` é
+substituído pelo engine SQLite em memória do fixture de teste antes do `TestClient` disparar
+o `lifespan` (ver `tests/conftest.py`), e a resolução de DNS do guard de SSRF é mockada nos
+testes que não precisam de rede de verdade.
+
+CI (GitHub Actions, `.github/workflows/ci.yml`) roda `ruff check`, `ruff format --check` e
+`pytest` a cada push/PR — a verificação deixou de ser só manual antes de cada push.
 
 ## Variáveis de ambiente
 
@@ -56,20 +63,22 @@ Veja `.env.example` para a lista completa e comentada. Principais:
 | Variável | Uso |
 |---|---|
 | `ADMIN_API_KEY` | Chave exigida no header `X-Admin-Api-Key` para todas as rotas `/api/admin/*` |
-| `DATABASE_URL` | **Obrigatória** — string de conexão SQLAlchemy. Ver seção [Banco de dados](#banco-de-dados) abaixo antes de rodar em qualquer ambiente que não seja o seu localhost |
+| `DATABASE_URL` | String de conexão SQLAlchemy. Se omitida, cai no default `sqlite:///./data/tutors.db` (ok para localhost) — configure explicitamente antes de rodar em qualquer ambiente que não seja o seu localhost. Ver seção [Banco de dados](#banco-de-dados) abaixo |
 | `LLM_MODEL` | Modelo no formato `provider:model` do pydantic-ai (ex.: `anthropic:claude-haiku-4-5-20251001`) |
 | `ANTHROPIC_API_KEY` / `OPENAI_API_KEY` | Lida diretamente pelo SDK do provedor (nunca pela aplicação) |
+| `LLM_TIMEOUT_SECONDS` | Timeout do turno do agente (`asyncio.wait_for` em `run_tutor_turn`); estourou → 503 amigável, não 500 |
 | `MAX_SOURCE_FETCH_BYTES`, `SOURCE_FETCH_TIMEOUT_SECONDS`, `SOURCE_CACHE_TTL_SECONDS` | Limites do fetch de fontes de conhecimento |
-| `CHAT_HISTORY_LIMIT` | Quantas últimas mensagens por sessão são carregadas/persistidas |
+| `CHAT_HISTORY_LIMIT` | Quantas últimas mensagens por sessão são carregadas **e mantidas** — mensagens mais antigas são apagadas a cada turno (ver `_trim_history`) |
 | `CORS_ALLOWED_ORIGINS` | Lista separada por vírgula, ou `*` |
-| `CHAT_RATE_LIMIT` | Limite da rota pública de chat, sintaxe do `slowapi` (ex. `20/minute`) |
+| `CHAT_RATE_LIMIT` | Limite das rotas públicas (chat, histórico, info do tutor), sintaxe do `slowapi` (ex. `20/minute`) |
+| `ADMIN_RATE_LIMIT` | Limite das rotas `/api/admin/*`, mais generoso — existe só para dificultar brute-force da admin key |
 | `FRONTEND_BASE_URL` | Usada só para montar o snippet `<iframe>` retornado ao admin |
 
 ## Banco de dados
 
-A aplicação **precisa** de `DATABASE_URL` configurada em `.env` — sem ela, `Settings` cai no
-default (`sqlite:///./data/tutors.db`), o que funciona para rodar local mas não deve ser
-assumido implicitamente em outros ambientes. Configure explicitamente essa variável em
+`DATABASE_URL` **não é obrigatória** para rodar local: se omitida, `Settings` cai no default
+(`sqlite:///./data/tutors.db`), que funciona de imediato. O que não deve ser assumido
+implicitamente é esse default em outros ambientes — configure a variável explicitamente em
 qualquer deploy fora do seu localhost.
 
 ### Opção padrão — SQLite (zero provisionamento)
@@ -219,13 +228,14 @@ Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiáve
 |---|---|---|
 | Orquestração do agente | **Pydantic AI** (não LangChain) | Tipagem nativa com Pydantic, API enxuta, bom encaixe para um agente com poucas tools bem definidas — menos abstração do que o escopo do MVP justificaria com LangChain |
 | Estratégia de conhecimento | Tool `fetch_source` (fetch HTTP + cache TTL), decisão de uso feita pelo próprio LLM via tool calling | Exigência explícita do desafio: nada de vector DB/embeddings como núcleo |
-| Histórico de conversa passado ao agente | Transcrito como texto simples, prefixado ao prompt do turno atual (não usa `message_history` nativo do pydantic-ai) | Evita acoplamento aos tipos internos de mensagem da biblioteca (`ModelRequest`/`ModelResponse`), simplificando manutenção; suficiente para o volume de histórico do MVP (`CHAT_HISTORY_LIMIT`) |
+| Histórico de conversa passado ao agente | `message_history` nativo do pydantic-ai (`ModelRequest`/`ModelResponse` reconstruídos a partir do `ChatMessage` persistido) | Papéis ficam estruturais, aplicados pelo próprio provedor — evita que o usuário force uma fala "do tutor" digitando algo como `"Tutor: ..."` na mensagem, o que acontecia com a alternativa mais simples (transcript em texto solto prefixado ao prompt) |
 | Transporte do chat | HTTP REST request/response | Mais simples de implementar, testar e hospedar dentro de um iframe; sem necessidade de conexão persistente para o volume de um MVP |
-| Auth admin | API key estática (`X-Admin-Api-Key`) | Único papel administrativo no escopo do desafio; evita construir login/hash de senha/JWT sem necessidade real |
-| Auth de embed | Token opaco por tutor (`embed_token`), validado a cada chamada pública | Não expõe a admin key no front público; escopado a um único tutor, rotacionável |
+| Auth admin | API key estática (`X-Admin-Api-Key`), rate-limitada (`ADMIN_RATE_LIMIT`) | Único papel administrativo no escopo do desafio; evita construir login/hash de senha/JWT sem necessidade real; o rate limit existe só para dificultar brute-force da chave |
+| Auth de embed | Token opaco por tutor (`embed_token`), validado a cada chamada pública via header `X-Embed-Token` (comparação em tempo constante, `hmac.compare_digest`) | Não expõe a admin key no front público; escopado a um único tutor, rotacionável; header em vez de query param evita o token vazar em logs de acesso |
 | Persistência | SQLite via SQLModel/SQLAlchemy | Zero infraestrutura extra para rodar o demo; troca para PostgreSQL é apenas mudar `DATABASE_URL`, pois a camada ORM é agnóstica ao dialeto |
-| Rate limiting | `slowapi`, por IP, só na rota pública de chat | É o endpoint mais exposto (sem auth de usuário real); RNF explícito do desafio |
+| Rate limiting | `slowapi`, por IP, nas rotas públicas (chat, histórico, info do tutor) e nas rotas admin | Cobre tanto o endpoint mais exposto (sem auth de usuário real, RNF explícito do desafio) quanto a superfície de brute-force da admin key |
 | Logs | JSON estruturado (`app/core/logging.py`) | Facilita depurar falhas de tool call do agente (RNF explícito) |
+| Erros do provedor de LLM | Qualquer falha (timeout, chave inválida, sem quota, erro de rede) é convertida em `ServiceUnavailableError` (503 amigável) em `run_tutor_turn`, com `asyncio.wait_for(LLM_TIMEOUT_SECONDS)` | Evita que um problema do provedor vaze como 500 genérico para o usuário final do widget; a causa real fica só no log estruturado do servidor |
 | Fallback de LLM sem chave de API | Ollama atrás de um profile do Docker Compose (não LM Studio/vLLM/repo próprio) | pydantic-ai já tem provider nativo para Ollama (zero código); testado e honesto sobre a limitação real (tool calling não confiável em modelos ≤3B — ver seção "Sem chave de LLM?") |
 
 ## Fluxo embed ponta a ponta
@@ -237,19 +247,25 @@ Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiáve
    (`{FRONTEND_BASE_URL}/widget?tutorId=...&token=...`).
 3. O integrador cola o snippet no site dele.
 4. O usuário final abre o site; o iframe carrega a página `/widget` do frontend, que chama
-   `POST /api/public/chat` com `tutor_id`, `embed_token` e a mensagem.
-5. O backend valida o token, carrega o histórico recente da sessão, monta o agente Pydantic AI
-   com as instruções do tutor, executa o turno (podendo chamar `fetch_source` se precisar de
-   contexto de uma fonte) e persiste o par pergunta/resposta.
+   `GET /api/public/tutors/{tutor_id}` (header `X-Embed-Token`) para mostrar o nome/descrição
+   do tutor no cabeçalho do chat, e depois `POST /api/public/chat` com `tutor_id`, `embed_token`
+   e a mensagem.
+5. O backend valida o token, carrega o histórico recente da sessão (como `message_history`
+   nativo do pydantic-ai), monta o agente com as instruções do tutor, executa o turno (podendo
+   chamar `fetch_source` se precisar de contexto de uma fonte) e persiste o par pergunta/resposta
+   — a mensagem do usuário é salva **antes** de chamar o LLM, então mesmo um turno que falhe
+   deixa rastro para depuração.
 6. Recarregar o iframe com o mesmo `session_id` (guardado no `localStorage` do widget) recupera
-   o histórico via `GET /api/public/chat/{session_id}/history`.
+   o histórico via `GET /api/public/chat/{session_id}/history` (header `X-Embed-Token`).
 
 ## Limitações conhecidas do MVP
 
 - Segurança "mínima aceitável para demo": API key estática, sem múltiplos admins/login, sem
   expiração automática do `embed_token`.
-- Mitigação de SSRF no fetch de fontes é básica (bloqueia IP privado/loopback resolvido), não
-  é uma proteção completa contra todos os vetores.
+- Mitigação de SSRF no fetch de fontes bloqueia IP privado/loopback/link-local resolvido **e**
+  revalida cada hop de redirect (uma URL pública que redirecione para um host interno não passa
+  despercebida) — mas ainda não é uma proteção completa: não há allow-list de domínio por tutor
+  nem proxy de egress dedicado (ver "Próximos passos").
 - Fontes suportadas são apenas URLs públicas HTTP(S) retornando texto/JSON simples — sem PDF,
   sem autenticação na fonte, sem crawler.
 - SQLite não é adequado para alta concorrência real; ver `DATABASE_URL` para trocar por Postgres.
@@ -257,6 +273,18 @@ Se quiser tentar um modelo maior que talvez chame a tool de forma mais confiáve
 - Fallback local via Ollama (ver "Sem chave de LLM?") só é confiável para tutores **sem**
   fonte de conhecimento — testado e confirmado que modelos ≤3B não chamam `fetch_source` de
   forma consistente através do endpoint OpenAI-compatible do Ollama.
+- O rate limiter (`slowapi`) guarda contadores em memória do processo — com múltiplas réplicas
+  atrás de um load balancer, o limite efetivo vira N×o configurado (ver "Próximos passos").
+
+## Nota sobre o histórico de commits
+
+Este repositório foi inicialmente construído como pastas locais dentro de um monorepo de
+desenvolvimento e só depois efetivamente separado nos dois repositórios exigidos pelo PRD
+(backend/frontend). Por isso, os primeiros commits deste histórico foram recriados no momento
+da separação e têm timestamps próximos entre si — não refletem a duração real da sessão de
+construção assistida por agente, que foi bem mais longa e iterativa (ver
+`docs/IMPLEMENTATION_PLAN.md` para o plano discutido antes da implementação). Os commits
+seguintes (a partir do bootstrap FastAPI/Docker) já refletem timestamps reais de iteração.
 
 ## Próximos passos para produção (não implementados)
 
@@ -280,9 +308,8 @@ apenas como possibilidade *futura e opcional*, não como algo que este MVP dever
 - **Secrets**: mover `ADMIN_API_KEY`/chaves de LLM do `.env` local para um secret manager do
   provedor de hospedagem (Fly secrets, AWS Secrets Manager, variáveis criptografadas do CI) —
   nunca commitar, nunca deixar em texto puro num volume compartilhado.
-- **CI/CD**: pipeline (ex. GitHub Actions) rodando `pytest` + `ruff check` + `ruff format --check`
-  em cada PR, build/push da imagem Docker e deploy automático ao mergear na `main`. Hoje essa
-  verificação é manual, feita antes de cada push.
+- **CI/CD**: lint + testes já rodam em CI (`.github/workflows/ci.yml`, GitHub Actions) a cada
+  push/PR. Falta ainda build/push da imagem Docker e deploy automático ao mergear na `main`.
 - **CORS de produção**: restringir `CORS_ALLOWED_ORIGINS` aos domínios reais dos integradores
   autorizados — o `*` atual é aceitável só para demo local, documentado como tal.
 - **Cabeçalhos de embed**: configurar explicitamente `Content-Security-Policy: frame-ancestors`
@@ -291,9 +318,12 @@ apenas como possibilidade *futura e opcional*, não como algo que este MVP dever
 - **Observabilidade real**: os logs JSON estruturados já existem, mas em produção precisam de
   um destino de agregação (Grafana Loki, Datadog, CloudWatch Logs), rastreamento de erros
   (Sentry) e alertas de uptime/latência sobre a rota de chat.
-- **Escalonamento horizontal**: o backend já é stateless (sem estado em memória entre
-  requisições, exceto o cache de fonte, que é só otimização), então escalar horizontalmente
-  atrás de um load balancer é direto assim que o banco deixar de ser SQLite local.
+- **Escalonamento horizontal**: o backend não guarda estado de negócio em memória entre
+  requisições (o cache de fonte vive no banco, não em memória) — mas o rate limiter
+  (`slowapi`) hoje guarda contadores em memória do processo. Antes de rodar múltiplas réplicas
+  atrás de um load balancer, trocar o storage do limiter para Redis (`slowapi` suporta
+  `storage_uri="redis://..."` nativamente) para o limite continuar valendo por usuário, não
+  por réplica.
 
 ### Estratégia de conhecimento e evolução do agente
 
@@ -332,7 +362,9 @@ apenas como possibilidade *futura e opcional*, não como algo que este MVP dever
 - **Expiração/rotação automática** de `embed_token`, com possibilidade de múltiplos tokens por
   tutor (ex.: um por ambiente/integrador).
 - **Hardening adicional de SSRF**: allow-list de domínios por tutor, proxy de egress dedicado —
-  a mitigação atual (bloqueio de IP privado/loopback) é básica, não completa.
+  a mitigação atual (bloqueio de IP privado/loopback/link-local, incluindo revalidação a cada
+  hop de redirect) cobre os vetores mais óbvios, mas não é uma allow-list explícita nem imune
+  a DNS rebinding com TTL zero entre a checagem e o request real.
 - **Isolamento multi-tenant real**, caso a plataforma passe a atender múltiplas organizações
   com dados segregados de verdade (hoje é single-tenant, fora de escopo explícito do PRD).
 

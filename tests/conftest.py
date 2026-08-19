@@ -21,7 +21,7 @@ def session_fixture():
 
 
 @pytest.fixture(name="client")
-def client_fixture(session: Session):
+def client_fixture(session: Session, monkeypatch: pytest.MonkeyPatch):
     def get_session_override():
         return session
 
@@ -30,6 +30,12 @@ def client_fixture(session: Session):
 
     app.dependency_overrides[get_session] = get_session_override
     app.dependency_overrides[get_llm_model] = get_llm_model_override
+
+    # O lifespan do FastAPI chama create_db_and_tables(), que usa o `engine` em nível
+    # de módulo de app.db (não a dependência get_session, que já foi sobrescrita acima).
+    # Sem isto, o startup do TestClient criaria tabelas no banco real configurado via
+    # .env do desenvolvedor em vez do engine SQLite em memória deste fixture.
+    monkeypatch.setattr("app.db.engine", session.get_bind())
 
     with TestClient(app) as client:
         yield client

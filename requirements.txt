@@ -12,8 +12,5 @@ slowapi==0.1.10
 # para o default (SQLite), por isso fica fora da instalação padrão.
 # psycopg[binary]==3.2.3
 
-# dev / test
-pytest==9.1.1
-pytest-asyncio==1.4.0
-respx==0.23.1
-ruff==0.16.3
+# Dependências de dev/test ficam em requirements-dev.txt (não vão para a imagem Docker
+# de produção — ver Dockerfile).

@@ -9,6 +9,10 @@
 > pai — é assim que os comandos `cd backend`/`cd frontend` abaixo fazem sentido. Cópia
 > idêntica também existe em
 > [`tutores-frontend/docs/TESTING.md`](https://github.com/GabrielFerreira7/tutores-frontend/blob/main/docs/TESTING.md).
+>
+> Os valores de `ADMIN_API_KEY` e `embed_token` usados abaixo (ex.: `dot-demo-admin-key`) são
+> descartáveis, só para rodar este roteiro em `localhost`, e não têm nenhum efeito fora do seu
+> ambiente local — nunca use um valor real de produção neste tipo de documento.
 
 ## 0. Pré-requisitos
 
