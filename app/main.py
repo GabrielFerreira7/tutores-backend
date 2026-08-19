@@ -7,7 +7,9 @@ from fastapi.responses import JSONResponse
 from slowapi import _rate_limit_exceeded_handler
 from slowapi.errors import RateLimitExceeded
 from slowapi.middleware import SlowAPIMiddleware
+from sqlmodel import text
 
+from app import db as db_module
 from app.api.admin.tutors import router as admin_tutors_router
 from app.api.public.chat import router as public_chat_router
 from app.config import get_settings
@@ -71,5 +73,11 @@ app.include_router(public_chat_router)
 
 
 @app.get("/health")
-def health() -> dict:
-    return {"status": "ok"}
+def health() -> JSONResponse:
+    try:
+        with db_module.engine.connect() as conn:
+            conn.execute(text("SELECT 1"))
+    except Exception:
+        logger.exception("health_check_db_failed")
+        return JSONResponse(status_code=503, content={"status": "unavailable"})
+    return JSONResponse(status_code=200, content={"status": "ok"})

@@ -1,4 +1,5 @@
 from datetime import datetime
+from typing import Literal
 
 from pydantic import BaseModel, Field, HttpUrl
 
@@ -25,7 +26,7 @@ class TutorUpdate(BaseModel):
     title: str | None = Field(default=None, min_length=1, max_length=200)
     short_description: str | None = Field(default=None, max_length=500)
     system_instructions: str | None = Field(default=None, min_length=1, max_length=8000)
-    status: str | None = None
+    status: Literal["active", "inactive"] | None = None
     sources: list[SourceCreate] | None = None
 
 
@@ -45,3 +46,12 @@ class EmbedSnippetResponse(BaseModel):
     tutor_id: str
     embed_url: str
     iframe_snippet: str
+
+
+class PublicTutorInfo(BaseModel):
+    """Subconjunto seguro de campos do tutor exposto ao widget público — sem
+    system_instructions nem embed_token, só o necessário para o cabeçalho do chat."""
+
+    id: str
+    title: str
+    short_description: str
